@@ -1,0 +1,36 @@
+model:
+  image_size: [60, 125]
+  sequence_length: 4
+  latent_dim: 16
+  emb_dim: 16
+  text_max_len: 120
+
+training:
+  batch_size: 8
+  learning_rate: 0.001
+  epochs: 5
+
+visual_encoder:
+  backbone: resnet18      # Innovation 1: pretrained ResNet-18
+  pretrained: true
+  freeze_backbone: true   # Freeze backbone, train projection head only
+
+sequence_predictor:
+  type: bigru             # Innovation 2: Bidirectional GRU
+  hidden_per_direction: 8 # 2 x 8 = 16 total hidden dim (same as baseline)
+  num_layers: 1
+
+text_autoencoder:
+  checkpoint: text_autoencoder.pth
+  frozen: true            # Pretrained weights, not trained further
+
+cot_losses:
+  use_frame_aware_grounding: true
+  use_contrastive_roi: true
+  use_entity_pooling: true
+  use_cot_text: true
+  lambda_reid: 0.10
+  lambda_ground_mse: 0.10
+  lambda_contrast: 0.10
+  lambda_entity_pool: 0.05
+  contrastive_tau: 0.07
