@@ -203,3 +203,105 @@ class SequencePredictor(nn.Module):
         predicted_text_logits_k, _, _ = self.text_decoder(decoder_input, h0, c0)
 
         return pred_image_content, pred_image_context, predicted_text_logits_k, h0, c0, z_v_seq, z_t_seq
+
+
+# ---------------------------------------------------------------------------
+# Experiment 1 — Cross-modal Attention Fusion
+# ---------------------------------------------------------------------------
+
+class CrossModalAttention(nn.Module):
+    """
+    Bidirectional cross-modal attention between image and text embeddings.
+    Image attends to text and text attends to image — each modality is
+    enriched with context from the other before fusion.
+    """
+
+    def __init__(self, dim):
+        super().__init__()
+        self.scale = dim ** 0.5
+        self.q_img = nn.Linear(dim, dim)
+        self.k_txt = nn.Linear(dim, dim)
+        self.v_txt = nn.Linear(dim, dim)
+        self.q_txt = nn.Linear(dim, dim)
+        self.k_img = nn.Linear(dim, dim)
+        self.v_img = nn.Linear(dim, dim)
+        self.norm_img = nn.LayerNorm(dim)
+        self.norm_txt = nn.LayerNorm(dim)
+
+    def forward(self, z_img, z_txt):
+        i = z_img.unsqueeze(1)
+        t = z_txt.unsqueeze(1)
+        attn_i2t = torch.softmax(
+            (self.q_img(i) @ self.k_txt(t).transpose(-2, -1)) / self.scale, dim=-1
+        )
+        z_img_out = self.norm_img(z_img + (attn_i2t @ self.v_txt(t)).squeeze(1))
+        attn_t2i = torch.softmax(
+            (self.q_txt(t) @ self.k_img(i).transpose(-2, -1)) / self.scale, dim=-1
+        )
+        z_txt_out = self.norm_txt(z_txt + (attn_t2i @ self.v_img(i)).squeeze(1))
+        return z_img_out, z_txt_out, attn_i2t.squeeze(1), attn_t2i.squeeze(1)
+
+
+class CrossModalSequencePredictor(nn.Module):
+    """
+    Sequence predictor with cross-modal attention fusion.
+    Replaces simple concatenation with bidirectional cross-modal attention
+    before the GRU. Works with any visual encoder (CNN or ResNet-18).
+    """
+
+    def __init__(self, visual_autoencoder, text_autoencoder, latent_dim, gru_hidden_dim):
+        super().__init__()
+        self.image_encoder = visual_autoencoder.encoder
+        self.text_encoder  = text_autoencoder.encoder
+
+        text_dim = text_autoencoder.encoder.hidden_dim
+        self.text_proj = (
+            nn.Linear(text_dim, latent_dim) if text_dim != latent_dim else nn.Identity()
+        )
+
+        self.cross_modal_attn = CrossModalAttention(latent_dim)
+
+        fusion_dim = latent_dim * 2
+        self.temporal_rnn = nn.GRU(fusion_dim, gru_hidden_dim, batch_first=True)
+        self.attention    = Attention(gru_hidden_dim)
+        self.projection   = nn.Sequential(
+            nn.Linear(gru_hidden_dim * 2, latent_dim), nn.ReLU()
+        )
+        self.image_decoder = visual_autoencoder.decoder
+        self.text_decoder  = text_autoencoder.decoder
+        self.fused_to_h0   = nn.Linear(latent_dim, text_dim)
+        self.fused_to_c0   = nn.Linear(latent_dim, text_dim)
+
+    def forward(self, image_seq, text_seq, target_seq):
+        B, S, C, H, W = image_seq.shape
+        z_v_flat     = self.image_encoder(image_seq.view(B * S, C, H, W))
+        _, hidden, _ = self.text_encoder(text_seq.view(B * S, -1))
+        z_t_flat     = self.text_proj(hidden.squeeze(0))
+
+        z_v_e, z_t_e, _, _ = self.cross_modal_attn(z_v_flat, z_t_flat)
+
+        z_v_seq  = z_v_e.view(B, S, -1)
+        z_t_seq  = z_t_e.view(B, S, -1)
+        z_fusion = torch.cat((z_v_e, z_t_e), dim=1).view(B, S, -1)
+
+        zseq, h = self.temporal_rnn(z_fusion)
+        h       = h.squeeze(0)
+        context = self.attention(zseq)
+        z       = self.projection(torch.cat((h, context), dim=1))
+
+        pred_img_content, pred_img_context = self.image_decoder(z)
+        h0 = self.fused_to_h0(z).unsqueeze(0)
+        c0 = self.fused_to_c0(z).unsqueeze(0)
+        pred_text, _, _ = self.text_decoder(target_seq[:, :, :-1].squeeze(1), h0, c0)
+
+        return pred_img_content, pred_img_context, pred_text, h0, c0, z_v_seq, z_t_seq
+
+    @torch.no_grad()
+    def get_attention_weights(self, image_seq, text_seq):
+        """Per-frame image→text attention weights [B, S] for visualisation."""
+        B, S, C, H, W = image_seq.shape
+        z_v = self.image_encoder(image_seq.view(B * S, C, H, W))
+        _, h, _ = self.text_encoder(text_seq.view(B * S, -1))
+        z_t = self.text_proj(h.squeeze(0))
+        _, _, attn_i2t, _ = self.cross_modal_attn(z_v, z_t)
+        return attn_i2t.view(B, S)
