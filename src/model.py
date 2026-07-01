@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.models as models
 
 
 # ---------------------------------------------------------------------------
@@ -305,3 +306,38 @@ class CrossModalSequencePredictor(nn.Module):
         z_t = self.text_proj(h.squeeze(0))
         _, _, attn_i2t, _ = self.cross_modal_attn(z_v, z_t)
         return attn_i2t.view(B, S)
+
+
+# ---------------------------------------------------------------------------
+# Experiment 2 — ResNet-18 Visual Encoder
+# ---------------------------------------------------------------------------
+
+class ResNetVisualEncoder(nn.Module):
+    """
+    Pretrained ResNet-18 visual encoder.
+    Projects 512-dim ResNet features down to latent_dim.
+    """
+
+    def __init__(self, latent_dim=16, freeze_backbone=True):
+        super().__init__()
+        resnet = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+        self.backbone = nn.Sequential(*list(resnet.children())[:-1])
+        if freeze_backbone:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+        self.projection = nn.Sequential(nn.Linear(512, latent_dim), nn.ReLU())
+
+    def forward(self, x):
+        return self.projection(self.backbone(x).flatten(1))
+
+
+class ResNetVisualAutoencoder(nn.Module):
+    """Drop-in replacement for VisualAutoencoder using pretrained ResNet-18 encoder."""
+
+    def __init__(self, latent_dim=16, freeze_backbone=True):
+        super().__init__()
+        self.encoder = ResNetVisualEncoder(latent_dim, freeze_backbone)
+        self.decoder = VisualDecoder(latent_dim)
+
+    def forward(self, x):
+        return self.decoder(self.encoder(x))
