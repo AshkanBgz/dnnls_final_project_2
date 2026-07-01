@@ -314,7 +314,8 @@ class CrossModalSequencePredictor(nn.Module):
 
 class ResNetVisualEncoder(nn.Module):
     """
-    Pretrained ResNet-18 visual encoder.
+    Pretrained ResNet-18 visual encoder with frozen backbone.
+    Applies ImageNet normalisation internally so the dataset only needs ToTensor().
     Projects 512-dim ResNet features down to latent_dim.
     """
 
@@ -326,8 +327,11 @@ class ResNetVisualEncoder(nn.Module):
             for p in self.backbone.parameters():
                 p.requires_grad = False
         self.projection = nn.Sequential(nn.Linear(512, latent_dim), nn.ReLU())
+        self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer('std',  torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
     def forward(self, x):
+        x = (x - self.mean) / self.std
         return self.projection(self.backbone(x).flatten(1))
 
 
