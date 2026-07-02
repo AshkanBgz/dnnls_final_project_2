@@ -345,3 +345,10 @@ class ResNetVisualAutoencoder(nn.Module):
 
     def forward(self, x):
         return self.decoder(self.encoder(x))
+
+
+# ---------------------------------------------------------------------------
+# Experiment 3 — ResNet-18 + Cross-modal Attention
+# Pairs ResNetVisualAutoencoder (Exp 2) with CrossModalSequencePredictor (Exp 1).
+# No new classes needed — the combination is assembled in experiments.ipynb.
+# ---------------------------------------------------------------------------
