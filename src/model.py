@@ -352,3 +352,11 @@ class ResNetVisualAutoencoder(nn.Module):
 # Pairs ResNetVisualAutoencoder (Exp 2) with CrossModalSequencePredictor (Exp 1).
 # No new classes needed — the combination is assembled in experiments.ipynb.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Experiment 4 — Larger Latent Dimension (latent_dim=64)
+# Uses VisualAutoencoder + CrossModalSequencePredictor with latent_dim=64.
+# Hypothesis: more capacity in the latent space captures richer features.
+# No new classes needed — latent_dim is a constructor argument.
+# ---------------------------------------------------------------------------
