@@ -423,3 +423,48 @@ class CrossModalBiGRUPredictor(nn.Module):
         z_v_seq = z_v.view(B, S, -1)
         z_t_seq = z_t.view(B, S, -1)
         return img_content, img_context, pred_text, h0, c0, z_v_seq, z_t_seq
+
+
+# exp 7 -- 2 layer GRU, trying to get deeper temporal features
+class CrossModalDeepGRUPredictor(nn.Module):
+
+    def __init__(self, visual_autoencoder, text_autoencoder, latent_dim, gru_hidden_dim):
+        super().__init__()
+        self.image_encoder = visual_autoencoder.encoder
+        self.text_encoder = text_autoencoder.encoder
+
+        tdim = text_autoencoder.encoder.hidden_dim
+        self.text_proj = nn.Linear(tdim, latent_dim) if tdim != latent_dim else nn.Identity()
+        self.cross_modal_attn = CrossModalAttention(latent_dim)
+
+        self.temporal_rnn = nn.GRU(latent_dim * 2, gru_hidden_dim,
+                                    num_layers=2, batch_first=True, dropout=0.1)
+        self.attention = Attention(gru_hidden_dim)
+        self.projection = nn.Sequential(nn.Linear(gru_hidden_dim * 2, latent_dim), nn.ReLU())
+
+        self.image_decoder = visual_autoencoder.decoder
+        self.text_decoder = text_autoencoder.decoder
+        self.fused_to_h0 = nn.Linear(latent_dim, tdim)
+        self.fused_to_c0 = nn.Linear(latent_dim, tdim)
+
+    def forward(self, image_seq, text_seq, target_seq):
+        B, S, C, H, W = image_seq.shape
+
+        zv = self.image_encoder(image_seq.view(B * S, C, H, W))
+        _, ht, _ = self.text_encoder(text_seq.view(B * S, -1))
+        zt = self.text_proj(ht.squeeze(0))
+
+        zv, zt, _, _ = self.cross_modal_attn(zv, zt)
+        fused = torch.cat((zv, zt), dim=1).view(B, S, -1)
+
+        out, h = self.temporal_rnn(fused)
+        h = h[-1]  # top layer only
+        ctx = self.attention(out)
+        z = self.projection(torch.cat((h, ctx), dim=1))
+
+        img_c, img_ctx = self.image_decoder(z)
+        h0 = self.fused_to_h0(z).unsqueeze(0)
+        c0 = self.fused_to_c0(z).unsqueeze(0)
+        pred_txt, _, _ = self.text_decoder(target_seq[:, :, :-1].squeeze(1), h0, c0)
+
+        return img_c, img_ctx, pred_txt, h0, c0, zv.view(B, S, -1), zt.view(B, S, -1)
