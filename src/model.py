@@ -370,3 +370,56 @@ class ResNetVisualAutoencoder(nn.Module):
 # and a wider GRU better captures temporal dependencies across 4 frames.
 # No new classes needed — changes are in training config and constructor args.
 # ---------------------------------------------------------------------------
+
+
+# exp 6 - trying bidirectional GRU to see if reading the sequence
+# in both directions helps with the final prediction
+class CrossModalBiGRUPredictor(nn.Module):
+
+    def __init__(self, visual_autoencoder, text_autoencoder, latent_dim, gru_hidden_dim):
+        super().__init__()
+        self.image_encoder = visual_autoencoder.encoder
+        self.text_encoder = text_autoencoder.encoder
+
+        text_dim = text_autoencoder.encoder.hidden_dim
+        self.text_proj = nn.Linear(text_dim, latent_dim) if text_dim != latent_dim else nn.Identity()
+        self.cross_modal_attn = CrossModalAttention(latent_dim)
+
+        # bidirectional so hidden size doubles in the output
+        self.temporal_rnn = nn.GRU(latent_dim * 2, gru_hidden_dim, batch_first=True, bidirectional=True)
+        self.attention = Attention(gru_hidden_dim * 2)
+        self.projection = nn.Sequential(
+            nn.Linear(gru_hidden_dim * 4, latent_dim),
+            nn.ReLU()
+        )
+
+        self.image_decoder = visual_autoencoder.decoder
+        self.text_decoder = text_autoencoder.decoder
+        self.fused_to_h0 = nn.Linear(latent_dim, text_dim)
+        self.fused_to_c0 = nn.Linear(latent_dim, text_dim)
+
+    def forward(self, image_seq, text_seq, target_seq):
+        B, S, C, H, W = image_seq.shape
+
+        z_v = self.image_encoder(image_seq.view(B * S, C, H, W))
+        _, h_txt, _ = self.text_encoder(text_seq.view(B * S, -1))
+        z_t = self.text_proj(h_txt.squeeze(0))
+
+        z_v, z_t, _, _ = self.cross_modal_attn(z_v, z_t)
+
+        fused = torch.cat((z_v, z_t), dim=1).view(B, S, -1)
+        out, h = self.temporal_rnn(fused)
+
+        # concat forward and backward hidden states
+        h = torch.cat((h[0], h[1]), dim=1)
+        ctx = self.attention(out)
+        z = self.projection(torch.cat((h, ctx), dim=1))
+
+        img_content, img_context = self.image_decoder(z)
+        h0 = self.fused_to_h0(z).unsqueeze(0)
+        c0 = self.fused_to_c0(z).unsqueeze(0)
+        pred_text, _, _ = self.text_decoder(target_seq[:, :, :-1].squeeze(1), h0, c0)
+
+        z_v_seq = z_v.view(B, S, -1)
+        z_t_seq = z_t.view(B, S, -1)
+        return img_content, img_context, pred_text, h0, c0, z_v_seq, z_t_seq
