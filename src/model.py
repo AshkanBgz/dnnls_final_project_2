@@ -468,3 +468,23 @@ class CrossModalDeepGRUPredictor(nn.Module):
         pred_txt, _, _ = self.text_decoder(target_seq[:, :, :-1].squeeze(1), h0, c0)
 
         return img_c, img_ctx, pred_txt, h0, c0, zv.view(B, S, -1), zt.view(B, S, -1)
+
+
+# exp 9 -- perceptual loss using VGG16 features instead of raw pixel L1
+# comparing feature maps gives sharper, more realistic image predictions
+class VGGPerceptualLoss(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        vgg = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
+        # use up to relu2_2 -- works better for small 60x125 images
+        self.features = nn.Sequential(*list(vgg.features.children())[:9])
+        for p in self.features.parameters():
+            p.requires_grad = False
+        self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer('std',  torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+
+    def forward(self, pred, target):
+        pred   = (pred   - self.mean) / self.std
+        target = (target - self.mean) / self.std
+        return F.mse_loss(self.features(pred), self.features(target))

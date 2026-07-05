@@ -20,6 +20,8 @@ def train_one_epoch(
     use_frame_aware_grounding=True,
     use_contrastive_roi=True,
     use_entity_pooling=True,
+    perceptual_loss_fn=None,
+    lambda_perceptual=1.0,
 ):
     model.train()
     running_loss = 0.0
@@ -93,12 +95,17 @@ def train_one_epoch(
                     if pool_losses:
                         loss_entity_pool = torch.stack(pool_losses).mean()
 
+        loss_perceptual = torch.tensor(0.0, device=device)
+        if perceptual_loss_fn is not None:
+            loss_perceptual = lambda_perceptual * perceptual_loss_fn(pred_image_content, image_target)
+
         loss = (
             loss_im + loss_context + loss_text
             + lambda_reid * loss_reid
             + lambda_ground_mse * loss_ground_mse
             + lambda_contrast * loss_contrast
             + lambda_entity_pool * loss_entity_pool
+            + loss_perceptual
         )
 
         loss.backward()
@@ -112,6 +119,7 @@ def train_one_epoch(
             'g_mse': float(loss_ground_mse),
             'nce': float(loss_contrast),
             'entpool': float(loss_entity_pool),
+            'percep': float(loss_perceptual),
         }
 
     return running_loss / len(dataloader), last_losses
@@ -127,6 +135,8 @@ def run_training(
     lr=0.001,
     cot_config=None,
     val_fn=None,
+    perceptual_loss_fn=None,
+    lambda_perceptual=1.0,
 ):
     if cot_config is None:
         cot_config = {}
@@ -146,13 +156,15 @@ def run_training(
             model, train_dataloader, optimizer,
             criterion_images, criterion_ctx, criterion_text,
             tokenizer, device, **cot_config,
+            perceptual_loss_fn=perceptual_loss_fn,
+            lambda_perceptual=lambda_perceptual,
         )
         losses.append(epoch_loss)
         print(
             f"Epoch [{epoch+1}/{n_epochs}] Loss: {epoch_loss:.4f}  "
             f"(im={last['im']:.3f}, ctx={last['ctx']:.3f}, txt={last['txt']:.3f}, "
             f"reid={last['reid']:.3f}, g_mse={last['g_mse']:.3f}, "
-            f"nce={last['nce']:.3f}, entpool={last['entpool']:.3f})"
+            f"nce={last['nce']:.3f}, entpool={last['entpool']:.3f}, percep={last['percep']:.3f})"
         )
         if val_fn is not None:
             val_fn(model, val_dataloader)
