@@ -360,3 +360,13 @@ class ResNetVisualAutoencoder(nn.Module):
 # Hypothesis: more capacity in the latent space captures richer features.
 # No new classes needed — latent_dim is a constructor argument.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Experiment 5 — Unfreeze Text Decoder + Larger GRU Hidden Dim (combined)
+# Base: CrossModal + CNN (Exp 1), latent_dim=16, gru_hidden_dim=64.
+# Text decoder unfrozen so it can adapt to story prediction task.
+# Hypothesis: allowing text generation to fine-tune improves text prediction,
+# and a wider GRU better captures temporal dependencies across 4 frames.
+# No new classes needed — changes are in training config and constructor args.
+# ---------------------------------------------------------------------------
