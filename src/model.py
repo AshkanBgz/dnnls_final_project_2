@@ -488,3 +488,8 @@ class VGGPerceptualLoss(nn.Module):
         pred   = (pred   - self.mean) / self.std
         target = (target - self.mean) / self.std
         return F.mse_loss(self.features(pred), self.features(target))
+
+
+# exp 10 -- combine best settings for image quality
+# latent_dim=64 gives decoder more info, perceptual loss sharpens output,
+# unfrozen text decoder adapts text generation -- no new classes needed
