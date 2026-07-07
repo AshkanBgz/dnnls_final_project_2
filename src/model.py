@@ -493,3 +493,64 @@ class VGGPerceptualLoss(nn.Module):
 # exp 10 -- combine best settings for image quality
 # latent_dim=64 gives decoder more info, perceptual loss sharpens output,
 # unfrozen text decoder adapts text generation -- no new classes needed
+
+
+# exp 11 -- swap the decoder's upsampling for pixel shuffle instead of
+# transposed conv, ConvTranspose2d tends to leave a checkerboard pattern
+# on the output. added a small residual conv at the end too so it can
+# clean up fine detail after upsampling. built on top of exp5's config
+# (unfreeze decoder + GRU-64), the best result so far
+class SharpVisualDecoder(nn.Module):
+
+    def __init__(self, latent_dim=16, output_w=8, output_h=16):
+        super().__init__()
+        self.imh = 60
+        self.imw = 125
+        self.output_w = output_w
+        self.output_h = output_h
+        self.flatten_dim = 64 * output_w * output_h
+        self.fc1 = nn.Linear(latent_dim, self.flatten_dim)
+
+        def up_block(in_ch, out_ch, k, pad):
+            return nn.Sequential(
+                nn.Conv2d(in_ch, out_ch * 4, k, padding=pad),
+                nn.PixelShuffle(2),
+                nn.GroupNorm(8, out_ch),
+                nn.LeakyReLU(0.1),
+            )
+
+        self.up1 = up_block(64, 32, 3, 1)
+        self.up2 = up_block(32, 16, 5, 2)
+        self.up3 = up_block(16, 16, 7, 3)
+
+        self.refine = nn.Sequential(
+            nn.Conv2d(16, 16, 3, padding=1),
+            nn.GroupNorm(8, 16),
+            nn.LeakyReLU(0.1),
+            nn.Conv2d(16, 3, 3, padding=1),
+        )
+        self.to_rgb = nn.Conv2d(16, 3, 3, padding=1)
+
+    def forward(self, z):
+        x = self.fc1(z)
+        return self.decode_image(x), self.decode_image(x)
+
+    def decode_image(self, x):
+        x = x.view(-1, 64, self.output_w, self.output_h)
+        x = self.up1(x)
+        x = self.up2(x)
+        x = self.up3(x)
+        out = torch.sigmoid(self.to_rgb(x) + self.refine(x))
+        return out[:, :, :self.imh, :self.imw]
+
+
+class SharpVisualAutoencoder(nn.Module):
+    # same as VisualAutoencoder but with SharpVisualDecoder
+
+    def __init__(self, latent_dim=16, output_w=8, output_h=16):
+        super().__init__()
+        self.encoder = VisualEncoder(latent_dim, output_w, output_h)
+        self.decoder = SharpVisualDecoder(latent_dim, output_w, output_h)
+
+    def forward(self, x):
+        return self.decoder(self.encoder(x))
