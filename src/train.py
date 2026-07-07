@@ -22,6 +22,7 @@ def train_one_epoch(
     use_entity_pooling=True,
     perceptual_loss_fn=None,
     lambda_perceptual=1.0,
+    lambda_image=1.0,
 ):
     model.train()
     running_loss = 0.0
@@ -100,7 +101,7 @@ def train_one_epoch(
             loss_perceptual = lambda_perceptual * perceptual_loss_fn(pred_image_content, image_target)
 
         loss = (
-            loss_im + loss_context + loss_text
+            lambda_image * loss_im + loss_context + loss_text
             + lambda_reid * loss_reid
             + lambda_ground_mse * loss_ground_mse
             + lambda_contrast * loss_contrast
@@ -137,6 +138,7 @@ def run_training(
     val_fn=None,
     perceptual_loss_fn=None,
     lambda_perceptual=1.0,
+    lambda_image=1.0,
 ):
     if cot_config is None:
         cot_config = {}
@@ -158,6 +160,7 @@ def run_training(
             tokenizer, device, **cot_config,
             perceptual_loss_fn=perceptual_loss_fn,
             lambda_perceptual=lambda_perceptual,
+            lambda_image=lambda_image,
         )
         losses.append(epoch_loss)
         print(
