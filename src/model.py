@@ -106,7 +106,6 @@ class VisualDecoder(nn.Module):
         self.flatten_dim = 64 * output_w * output_h
 
         self.fc1 = nn.Linear(latent_dim, self.flatten_dim)
-        # shared trunk -- both heads branch off after this
         self.decoder_conv = nn.Sequential(
             nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=(1, 1)),
             nn.GroupNorm(8, 32),
@@ -114,27 +113,18 @@ class VisualDecoder(nn.Module):
             nn.ConvTranspose2d(32, 16, kernel_size=5, stride=2, padding=2, output_padding=1),
             nn.GroupNorm(8, 16),
             nn.LeakyReLU(0.1),
-        )
-        # separate heads for content vs context -- these used to be the same
-        # tensor (decode_image(x) called twice), which meant one output was
-        # being pulled toward the real target frame AND the batch-average frame
-        # at the same time. splitting them lets each head actually specialise.
-        self.content_head = nn.Sequential(
-            nn.ConvTranspose2d(16, 3, kernel_size=7, stride=2, padding=3, output_padding=(1, 1)),
-            nn.Sigmoid(),
-        )
-        self.context_head = nn.Sequential(
             nn.ConvTranspose2d(16, 3, kernel_size=7, stride=2, padding=3, output_padding=(1, 1)),
             nn.Sigmoid(),
         )
 
     def forward(self, z):
         x = self.fc1(z)
+        return self.decode_image(x), self.decode_image(x)
+
+    def decode_image(self, x):
         x = x.view(-1, 64, self.output_w, self.output_h)
-        feat = self.decoder_conv(x)
-        content = self.content_head(feat)[:, :, :self.imh, :self.imw]
-        context = self.context_head(feat)[:, :, :self.imh, :self.imw]
-        return content, context
+        x = self.decoder_conv(x)
+        return x[:, :, :self.imh, :self.imw]
 
 
 class VisualAutoencoder(nn.Module):
@@ -480,7 +470,7 @@ class CrossModalDeepGRUPredictor(nn.Module):
         return img_c, img_ctx, pred_txt, h0, c0, zv.view(B, S, -1), zt.view(B, S, -1)
 
 
-# exp 9 -- perceptual loss using VGG16 features instead of raw pixel L1
+# exp 8 -- perceptual loss using VGG16 features instead of raw pixel L1
 # comparing feature maps gives sharper, more realistic image predictions
 class VGGPerceptualLoss(nn.Module):
 
@@ -500,12 +490,12 @@ class VGGPerceptualLoss(nn.Module):
         return F.mse_loss(self.features(pred), self.features(target))
 
 
-# exp 10 -- combine best settings for image quality
+# exp 9 -- combine best settings for image quality
 # latent_dim=64 gives decoder more info, perceptual loss sharpens output,
 # unfrozen text decoder adapts text generation -- no new classes needed
 
 
-# exp 11 -- swap the decoder's upsampling for pixel shuffle instead of
+# exp 10 -- swap the decoder's upsampling for pixel shuffle instead of
 # transposed conv, ConvTranspose2d tends to leave a checkerboard pattern
 # on the output. added a small residual conv at the end too so it can
 # clean up fine detail after upsampling. built on top of exp5's config
@@ -533,10 +523,68 @@ class SharpVisualDecoder(nn.Module):
         self.up2 = up_block(32, 16, 5, 2)
         self.up3 = up_block(16, 16, 7, 3)
 
-        # separate refine+to_rgb heads for content vs context -- previously
-        # both outputs were the same decode_image(x) call, so the content
-        # loss (real target frame) and context loss (batch-average frame)
-        # were fighting over one shared tensor. each head can now specialise.
+        self.refine = nn.Sequential(
+            nn.Conv2d(16, 16, 3, padding=1),
+            nn.GroupNorm(8, 16),
+            nn.LeakyReLU(0.1),
+            nn.Conv2d(16, 3, 3, padding=1),
+        )
+        self.to_rgb = nn.Conv2d(16, 3, 3, padding=1)
+
+    def forward(self, z):
+        x = self.fc1(z)
+        return self.decode_image(x), self.decode_image(x)
+
+    def decode_image(self, x):
+        x = x.view(-1, 64, self.output_w, self.output_h)
+        x = self.up1(x)
+        x = self.up2(x)
+        x = self.up3(x)
+        out = torch.sigmoid(self.to_rgb(x) + self.refine(x))
+        return out[:, :, :self.imh, :self.imw]
+
+
+class SharpVisualAutoencoder(nn.Module):
+    # same as VisualAutoencoder but with SharpVisualDecoder
+
+    def __init__(self, latent_dim=16, output_w=8, output_h=16):
+        super().__init__()
+        self.encoder = VisualEncoder(latent_dim, output_w, output_h)
+        self.decoder = SharpVisualDecoder(latent_dim, output_w, output_h)
+
+    def forward(self, x):
+        return self.decoder(self.encoder(x))
+
+
+# exp 11 -- found a bug in exp 10 (and every decoder before it really):
+# forward() just called decode_image(x) twice, so content and context were
+# literally the same tensor, being pulled toward two different targets at
+# once (the real frame vs the batch-average frame). that's why exp 10's
+# predicted image was just a flat gray blob. giving each one its own head
+# fixes that
+class SharpVisualDecoderV2(nn.Module):
+
+    def __init__(self, latent_dim=16, output_w=8, output_h=16):
+        super().__init__()
+        self.imh = 60
+        self.imw = 125
+        self.output_w = output_w
+        self.output_h = output_h
+        self.flatten_dim = 64 * output_w * output_h
+        self.fc1 = nn.Linear(latent_dim, self.flatten_dim)
+
+        def up_block(in_ch, out_ch, k, pad):
+            return nn.Sequential(
+                nn.Conv2d(in_ch, out_ch * 4, k, padding=pad),
+                nn.PixelShuffle(2),
+                nn.GroupNorm(8, out_ch),
+                nn.LeakyReLU(0.1),
+            )
+
+        self.up1 = up_block(64, 32, 3, 1)
+        self.up2 = up_block(32, 16, 5, 2)
+        self.up3 = up_block(16, 16, 7, 3)
+
         def make_head():
             return nn.ModuleDict({
                 'refine': nn.Sequential(
@@ -566,13 +614,13 @@ class SharpVisualDecoder(nn.Module):
         )
 
 
-class SharpVisualAutoencoder(nn.Module):
-    # same as VisualAutoencoder but with SharpVisualDecoder
+class SharpVisualAutoencoderV2(nn.Module):
+    # same as SharpVisualAutoencoder but with the content/context bug fixed
 
     def __init__(self, latent_dim=16, output_w=8, output_h=16):
         super().__init__()
         self.encoder = VisualEncoder(latent_dim, output_w, output_h)
-        self.decoder = SharpVisualDecoder(latent_dim, output_w, output_h)
+        self.decoder = SharpVisualDecoderV2(latent_dim, output_w, output_h)
 
     def forward(self, x):
         return self.decoder(self.encoder(x))
