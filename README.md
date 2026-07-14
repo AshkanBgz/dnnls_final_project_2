@@ -88,6 +88,32 @@ ran, that's consistently people/faces rather than background - a sane thing for 
 to prioritise, even though the frame it goes on to predict is the flat blob shown in Figure 3. More
 examples are in `results/exp5/gradcam_examples/`.
 
+## Visual latent space is basically collapsed
+
+While building the Grad-CAM demo I also ran PCA on what the visual encoder actually outputs for a
+batch of validation frames, just to look at it. I did not expect what came out.
+
+![Latent space PCA, Exp 0 vs Exp 5](results/exp5/latent_space_pca_comparison.png)
+**Figure 5:** PCA of the visual encoder's output embeddings, Exp 0 (frozen decoder, left) vs Exp 5
+(unfrozen decoder, right). Look at the axis scales - Exp 0 is `1e-7`, Exp 5 is `1e-5`. Both are
+effectively a single point. A healthy encoder should spread different input frames across the plot
+based on what's actually in them; instead almost every frame maps to nearly the same vector,
+regardless of what the frame shows.
+
+I don't fully know why this happens. My best guess is that it's the same root cause as the bug
+below: if the image loss barely affects the combined loss, the encoder has no real pressure to
+produce embeddings that differ from frame to frame - collapsing to one output for everything is a
+perfectly good way to minimize a loss term you don't actually need to pay attention to. That's a
+guess, not something I verified. I also ran this on Exp 10 (unfrozen decoder too, same encoder
+architecture as Exp 5, just a different decoder) and it collapsed just as hard as Exp 0 - so
+"unfrozen decoder" alone doesn't explain why Exp 5 is the only one with any spread at all. I don't
+have an explanation for that part and I'm not going to pretend I do.
+
+What I can say plainly: if the encoder is barely distinguishing input frames from each other in the
+first place, that alone would be enough to explain why every experiment's predicted frame looks like
+a flat gray blob - the decoder can't reconstruct detail from a latent vector that already threw the
+detail away.
+
 ## A bug I found (and only half-fixed)
 
 At some point I actually looked at what the predicted images looked like instead of just trusting the
