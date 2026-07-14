@@ -21,6 +21,16 @@ HuggingFace. Trained everything in Colab since I don't have a GPU locally.
 Honestly the loss numbers across most experiments are annoyingly close together, which made it hard
 to tell what was actually helping. Here's what I got:
 
+![Training loss across all 11 experiments](results/all_experiments_loss_comparison.png)
+**Figure 1:** Training loss curves for all 11 experiments, plotted together. Most variants (concat
+vs. cross-modal attention, CNN vs. ResNet-18, BiGRU, deeper GRU) sit in a flat cluster around
+4.3-4.4 and barely move. Exp 8/9 (perceptual loss) start higher on a different loss scale but trend
+down. The two curves that actually break away from the cluster and keep dropping - Exp 5 and Exp
+10 - are the only ones with the text decoder unfrozen and 60 full epochs, ending at 3.61. That
+combination is the one change that mattered; everything else is noise around the same plateau.
+
+**Table 1:** Final training loss per experiment (same data as Figure 1, as numbers).
+
 | # | What changed | Epochs | Final loss |
 |---|---|---|---|
 | 0 | Baseline (CNN + concat + GRU) | 25 | 4.361 |
@@ -44,9 +54,10 @@ Also, exp 8 and 9's numbers aren't really comparable to the others since they ha
 perceptual loss term added on top of the normal loss, so the number itself is measuring something
 slightly different.
 
-Loss curve for exp 5, the best run:
-
 ![Exp 5 loss curve](results/exp5/experiment_5_unfreeze_text_decoder_gru-64_(60_epochs)_loss.png)
+**Figure 2:** Training loss for Exp 5 on its own (unfrozen text decoder + GRU-64), 60 epochs. Loss
+drops steadily across the full run with no plateau or divergence, ending at 3.61 - the lowest of any
+experiment.
 
 ## What the predictions actually look like
 
@@ -56,9 +67,10 @@ exp 10, predicted frame next to ground truth:
 
 ![Exp 9 prediction vs ground truth](results/exp9/exp9_prediction.png)
 ![Exp 10 prediction vs ground truth](results/exp10/exp10_prediction.png)
-
-Text prediction and the loss curve going down were both real, so the model wasn't doing nothing -
-it's specifically the image branch that collapsed. See the bug writeup below for why.
+**Figure 3:** Predicted frame vs. ground truth, Exp 9 (top) and Exp 10 (bottom) - the two lowest-loss
+runs after Exp 5. Both collapse to a near-uniform gray/beige field with no structure, despite falling
+loss values throughout training. Text prediction and the loss curve were both improving normally, so
+this is specifically an image-decoder failure - see the bug writeup below for the actual cause.
 
 ## Explainability (Grad-CAM)
 
@@ -70,11 +82,11 @@ which regions of an input frame the gradient says matter most for that loss.
 
 ![Grad-CAM example 1](results/exp5/gradcam_examples/gradcam_example_1.png)
 ![Grad-CAM example 2](results/exp5/gradcam_examples/gradcam_example_4.png)
-
-Across the examples I ran, the heatmap consistently lights up on people/faces in the frame rather
-than background, which is a sane thing for the model to be attending to even though the actual
-predicted image it produces is the gray blob described above. More examples are in
-`results/exp5/gradcam_examples/`.
+**Figure 4:** Grad-CAM overlays on two validation frames, Exp 5 checkpoint. Warm regions (red/yellow)
+mark where the gradient of the image reconstruction loss concentrates most. Across every example I
+ran, that's consistently people/faces rather than background - a sane thing for the visual encoder
+to prioritise, even though the frame it goes on to predict is the flat blob shown in Figure 3. More
+examples are in `results/exp5/gradcam_examples/`.
 
 ## A bug I found (and only half-fixed)
 
