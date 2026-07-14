@@ -33,7 +33,7 @@ to tell what was actually helping. Here's what I got:
 | 7 | 2-layer GRU | 25 | 4.352 |
 | 8 | Added VGG perceptual loss | 25 | 4.31 |
 | 9 | latent64 + perceptual loss + unfrozen decoder combined | 30 | 4.31 |
-| 10 | Sharper decoder (pixel shuffle instead of transposed conv) | 53/60, got interrupted | 3.63 |
+| 10 | Sharper decoder (pixel shuffle instead of transposed conv) | 60 | 3.61 |
 
 Exp 5 is clearly the best number, but I should be upfront that it also just got way more epochs (60
 vs 25-35 for everything else), so it's not really a fair one-variable-at-a-time comparison, more like
@@ -47,7 +47,8 @@ slightly different.
 ## A bug I found (and only half-fixed)
 
 At some point I actually looked at what the predicted images looked like instead of just trusting the
-loss number, and they were basically a flat gray blob - no visible structure at all. Turned out the
+loss number, and they were basically a flat gray blob - no visible structure at all, even after the
+full 60 epochs. Turned out the
 decoder's forward() function was calling the same internal function twice and returning it as both
 "content" and "context" - so it was literally the same tensor being pushed toward two different
 targets at once (the real frame, and the average of the input frames) by two different loss terms.
