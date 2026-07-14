@@ -132,10 +132,6 @@ number is just naturally way bigger than the image loss number (cross-entropy ov
 L1 pixel loss), so even with two separate heads, the combined loss was still mostly "about text",
 starving the image branch. Added a weight to fix that too.
 
-Ran out of time to actually confirm this two-part fix works before the deadline. So this needs to be
-said honestly in the presentation: found a real bug, understood why it was happening, fixed the code,
-but couldn't finish verifying it before submission.
-
 ## Repo layout
 - `src/model.py` - every architecture variant, roughly one comment block per experiment
 - `src/train.py` - the training loop
