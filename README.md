@@ -59,6 +59,52 @@ slightly different.
 drops steadily across the full run with no plateau or divergence, ending at 3.61 - the lowest of any
 experiment.
 
+## Going through each experiment
+
+**Exp 0 - Baseline.** Change: nothing yet, this is the starting point - CNN encoder, simple concat
+fusion of image and text vectors, GRU-16, text decoder frozen. Result: 4.361 after 25 epochs.
+Analysis: this is the number everything else gets compared against. Nothing special to say about it
+except that its own visual latent space turned out to be almost completely collapsed (Figure 5) -
+so whatever the other experiments changed, none of it was fixing that.
+
+**Exp 1 - Cross-modal attention instead of concat.** Change: replaced the simple concatenation of
+image and text vectors with a bidirectional attention block I wrote, so each modality can attend to
+the other before fusing. Result: 4.360, 25 epochs - functionally the same as baseline. Analysis:
+this was supposed to be the interesting one and it did basically nothing. Either the attention
+block isn't wired to matter much for this loss, or the bottleneck is somewhere else entirely (which,
+given Figure 5, it probably is - no amount of fusion logic helps if the encoder feeding it is
+already collapsed).
+
+**Exp 2 - Frozen ResNet-18 instead of my CNN.** Change: swapped the from-scratch CNN visual encoder
+for a pretrained, frozen ResNet-18. Result: 4.406, 35 epochs - slightly worse than baseline, not
+better. Analysis: pretrained ImageNet features didn't transfer well to these small, comic-style
+frames, or 512-dim frozen features projected down to 16 lost more than they gave. Either way, more
+"sophisticated" encoder, worse number.
+
+**Exp 5 - Unfroze the text decoder + GRU-64.** Change: two things at once - let the text decoder
+actually adapt during training instead of staying frozen, and widened the GRU from 16 to 64. Result:
+3.61, the best of all 11, and the only training curve that doesn't plateau (Figure 2). Analysis:
+this is also the only experiment I ran PCA on that shows any real spread in the visual latent space
+(Figure 5) - though I don't have a solid explanation for why, since Exp 10 has the same GRU width
+and also unfroze the decoder, yet collapsed anyway. What I can say for sure is this needed 60 epochs
+to get here, more than double most other runs, so part of "best" is just "trained longest."
+
+**Exp 8 - VGG perceptual loss.** Change: replaced plain L1 pixel loss with a VGG-feature-based
+perceptual loss, on top of Exp 5's config (GRU-64, unfrozen decoder). Result: 4.31 over 25 epochs -
+but this number isn't on the same scale as the others, since perceptual loss is a different
+quantity than L1, so it can't be read as "worse than Exp 5's 3.61." Analysis: I can't honestly say
+whether this helped or not without re-measuring on a common metric, which I didn't get to.
+
+**Exp 10 - Sharper decoder (pixel shuffle).** Change: swapped the transposed-convolution decoder for
+a pixel-shuffle based one, meant to remove checkerboard artifacts, built on top of Exp 5's config.
+Result: 3.61, matching Exp 5 almost exactly. Analysis: this is the one with the actual bug - the
+decoder's forward pass called the same internal function twice for content and context, so the
+"sharper" decoder produced the same flat gray blob as everything else (see the bug writeup below).
+The loss number looked fine; the image did not.
+
+Full config and training log for every experiment (including the ones not covered here) are in
+`results/expN/config.md` and `results/expN/training_log.txt`.
+
 ## What the predictions actually look like
 
 The loss table above hides something the numbers alone don't show: the predicted images across
