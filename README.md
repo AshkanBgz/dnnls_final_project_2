@@ -262,6 +262,10 @@ starving the image branch. Added a weight to fix that too.
 - `src/model.py` - every architecture variant, roughly one comment block per experiment
 - `src/train.py` - the training loop
 - `src/utils.py` - dataset loading, CoT grounding stuff, the validation/plotting function
+- `src/gradcam.py` - Grad-CAM adapted for the image reconstruction loss (explainability)
 - `experiments.ipynb` - one section per experiment, meant to be run in Colab top to bottom
-- `results/expN/` - trained weights + loss curve (and a prediction image, for some) per experiment
+- `results/expN/` - trained weights + loss curve + config.md + training_log.txt per experiment
+- `results/gradcam_examples/` - Grad-CAM demo outputs (Figure 4)
+- `results/all_experiments_loss_comparison.png`, `results/latent_space_pca_comparison.png` - the
+  combined-comparison figures (Figure 1, Figure 5)
 - `Baseline.ipynb` - the module's starter notebook, untouched
