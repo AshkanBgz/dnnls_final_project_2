@@ -44,6 +44,38 @@ Also, exp 8 and 9's numbers aren't really comparable to the others since they ha
 perceptual loss term added on top of the normal loss, so the number itself is measuring something
 slightly different.
 
+Loss curve for exp 5, the best run:
+
+![Exp 5 loss curve](results/exp5/experiment_5_unfreeze_text_decoder_gru-64_(60_epochs)_loss.png)
+
+## What the predictions actually look like
+
+The loss table above hides something the numbers alone don't show: the predicted images across
+every single experiment come out as a flat gray/beige blob, no visible structure. Here's exp 9 and
+exp 10, predicted frame next to ground truth:
+
+![Exp 9 prediction vs ground truth](results/exp9/exp9_prediction.png)
+![Exp 10 prediction vs ground truth](results/exp10/exp10_prediction.png)
+
+Text prediction and the loss curve going down were both real, so the model wasn't doing nothing -
+it's specifically the image branch that collapsed. See the bug writeup below for why.
+
+## Explainability (Grad-CAM)
+
+Since this is a generation task rather than classification, there's no class score to backprop
+from for Grad-CAM in the usual sense. Instead `src/gradcam.py` backprops from the image
+reconstruction loss (L1 between predicted and target frame) on the last conv layer of the visual
+encoder, using the exp 5 checkpoint (best loss, no retraining needed for this). The heatmap shows
+which regions of an input frame the gradient says matter most for that loss.
+
+![Grad-CAM example 1](results/exp5/gradcam_examples/gradcam_example_1.png)
+![Grad-CAM example 2](results/exp5/gradcam_examples/gradcam_example_4.png)
+
+Across the examples I ran, the heatmap consistently lights up on people/faces in the frame rather
+than background, which is a sane thing for the model to be attending to even though the actual
+predicted image it produces is the gray blob described above. More examples are in
+`results/exp5/gradcam_examples/`.
+
 ## A bug I found (and only half-fixed)
 
 At some point I actually looked at what the predicted images looked like instead of just trusting the
