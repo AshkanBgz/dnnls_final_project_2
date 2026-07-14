@@ -126,20 +126,20 @@ reconstruction loss (L1 between predicted and target frame) on the last conv lay
 encoder, using the exp 5 checkpoint (best loss, no retraining needed for this). The heatmap shows
 which regions of an input frame the gradient says matter most for that loss.
 
-![Grad-CAM example 1](results/exp5/gradcam_examples/gradcam_example_1.png)
-![Grad-CAM example 2](results/exp5/gradcam_examples/gradcam_example_4.png)
+![Grad-CAM example 1](results/gradcam_examples/gradcam_example_1.png)
+![Grad-CAM example 2](results/gradcam_examples/gradcam_example_4.png)
 **Figure 4:** Grad-CAM overlays on two validation frames, Exp 5 checkpoint. Warm regions (red/yellow)
 mark where the gradient of the image reconstruction loss concentrates most. Across every example I
 ran, that's consistently people/faces rather than background - a sane thing for the visual encoder
 to prioritise, even though the frame it goes on to predict is the flat blob shown in Figure 3. More
-examples are in `results/exp5/gradcam_examples/`.
+examples are in `results/gradcam_examples/`.
 
 ## Visual latent space is basically collapsed
 
 While building the Grad-CAM demo I also ran PCA on what the visual encoder actually outputs for a
 batch of validation frames, just to look at it. I did not expect what came out.
 
-![Latent space PCA, Exp 0 vs Exp 5](results/exp5/latent_space_pca_comparison.png)
+![Latent space PCA, Exp 0 vs Exp 5](results/latent_space_pca_comparison.png)
 **Figure 5:** PCA of the visual encoder's output embeddings, Exp 0 (frozen decoder, left) vs Exp 5
 (unfrozen decoder, right). Look at the axis scales - Exp 0 is `1e-7`, Exp 5 is `1e-5`. Both are
 effectively a single point. A healthy encoder should spread different input frames across the plot
