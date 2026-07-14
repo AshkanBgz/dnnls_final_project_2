@@ -16,6 +16,86 @@ representing "what should come next", which then gets decoded back into an image
 Dataset is [daniel3303/StoryReasoning](https://huggingface.co/datasets/daniel3303/StoryReasoning) on
 HuggingFace. Trained everything in Colab since I don't have a GPU locally.
 
+## The two components I picked to improve
+
+In my pre-registration I picked the **visual encoder** and the **sequence predictor** as the two
+components to work on - they were the two parts I understood well enough to make deliberate changes
+to instead of just guessing.
+
+**Visual encoder - transfer learning with ResNet-18 (Exp 2, Exp 3).** The baseline uses a small CNN
+trained from scratch. I swapped it for a pretrained, frozen ResNet-18 to see if ImageNet features
+transfer to these comic-style frames:
+
+```python
+class ResNetVisualEncoder(nn.Module):
+    """
+    Pretrained ResNet-18 visual encoder with frozen backbone.
+    Applies ImageNet normalisation internally so the dataset only needs ToTensor().
+    Projects 512-dim ResNet features down to latent_dim.
+    """
+
+    def __init__(self, latent_dim=16, freeze_backbone=True):
+        super().__init__()
+        resnet = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+        self.backbone = nn.Sequential(*list(resnet.children())[:-1])
+        if freeze_backbone:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+        self.projection = nn.Sequential(nn.Linear(512, latent_dim), nn.ReLU())
+        self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer('std',  torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+
+    def forward(self, x):
+        x = (x - self.mean) / self.std
+        return self.projection(self.backbone(x).flatten(1))
+```
+
+Full class: `ResNetVisualEncoder` in `src/model.py`. Result: this made things slightly worse, not
+better (4.406 vs baseline's 4.361, see Table 1)
+
+**Sequence predictor - cross-modal attention (Exp 1 onward).** The baseline just concatenates the
+image vector and text vector before feeding them to the GRU. I replaced that with a bidirectional
+attention block so each modality can attend to the other first:
+
+```python
+class CrossModalAttention(nn.Module):
+    """
+    Bidirectional cross-modal attention between image and text embeddings.
+    Image attends to text and text attends to image — each modality is
+    enriched with context from the other before fusion.
+    """
+
+    def __init__(self, dim):
+        super().__init__()
+        self.scale = dim ** 0.5
+        self.q_img = nn.Linear(dim, dim)
+        self.k_txt = nn.Linear(dim, dim)
+        self.v_txt = nn.Linear(dim, dim)
+        self.q_txt = nn.Linear(dim, dim)
+        self.k_img = nn.Linear(dim, dim)
+        self.v_img = nn.Linear(dim, dim)
+        self.norm_img = nn.LayerNorm(dim)
+        self.norm_txt = nn.LayerNorm(dim)
+
+    def forward(self, z_img, z_txt):
+        i = z_img.unsqueeze(1)
+        t = z_txt.unsqueeze(1)
+        attn_i2t = torch.softmax(
+            (self.q_img(i) @ self.k_txt(t).transpose(-2, -1)) / self.scale, dim=-1
+        )
+        z_img_out = self.norm_img(z_img + (attn_i2t @ self.v_txt(t)).squeeze(1))
+        attn_t2i = torch.softmax(
+            (self.q_txt(t) @ self.k_img(i).transpose(-2, -1)) / self.scale, dim=-1
+        )
+        z_txt_out = self.norm_txt(z_txt + (attn_t2i @ self.v_img(i)).squeeze(1))
+        return z_img_out, z_txt_out, attn_i2t.squeeze(1), attn_t2i.squeeze(1)
+```
+
+Full class: `CrossModalAttention` in `src/model.py`, used by `CrossModalSequencePredictor` and its
+variants (Exp 1, 3, 4, 5, 8, 9, 10). Result: 4.360 vs baseline's 4.361 on its own (Exp 1) -
+essentially no change by itself. It only mattered once combined with unfreezing the text decoder in
+Exp 5 (see Table 1 and the per-experiment breakdown below).
+
 ## Results
 
 Honestly the loss numbers across most experiments are annoyingly close together, which made it hard
@@ -33,17 +113,17 @@ combination is the one change that mattered; everything else is noise around the
 
 | # | What changed | Epochs | Final loss |
 |---|---|---|---|
-| 0 | Baseline (CNN + concat + GRU) | 25 | 4.361 |
-| 1 | Cross-modal attention instead of concat | 25 | 4.360 |
-| 2 | Swapped in frozen ResNet-18 | 35 | 4.406 |
-| 3 | ResNet-18 + cross-modal attention together | 25 | 4.371 |
-| 4 | Bigger latent dim (64 instead of 16) | 25 | 4.361 |
-| 5 | Unfroze the text decoder + wider GRU (64) | 60 | **3.61** |
-| 6 | Bidirectional GRU | 25 | 4.362 |
-| 7 | 2-layer GRU | 25 | 4.352 |
-| 8 | Added VGG perceptual loss | 25 | 4.31 |
-| 9 | latent64 + perceptual loss + unfrozen decoder combined | 30 | 4.31 |
-| 10 | Sharper decoder (pixel shuffle instead of transposed conv) | 60 | 3.61 |
+| 0 | Baseline (CNN + concat + GRU) | 25 | 4.3612 |
+| 1 | Cross-modal attention instead of concat | 25 | 4.3605 |
+| 2 | Swapped in frozen ResNet-18 | 35 | 4.4059 |
+| 3 | ResNet-18 + cross-modal attention together | 25 | 4.3705 |
+| 4 | Bigger latent dim (64 instead of 16) | 25 | 4.3610 |
+| 5 | Unfroze the text decoder + wider GRU (64) | 60 | **3.6093** |
+| 6 | Bidirectional GRU | 25 | 4.3620 |
+| 7 | 2-layer GRU | 25 | 4.3521 |
+| 8 | Added VGG perceptual loss | 25 | 4.3135 |
+| 9 | latent64 + perceptual loss + unfrozen decoder combined | 30 | 4.3089 |
+| 10 | Sharper decoder (pixel shuffle instead of transposed conv) | 60 | **3.6077** |
 
 Exp 5 is clearly the best number, but I should be upfront that it also just got way more epochs (60
 vs 25-35 for everything else), so it's not really a fair one-variable-at-a-time comparison, more like
